@@ -30,8 +30,8 @@ data:
       dataset_configs:
         - _target_: data.datasets.co3d.Co3dDataset
           split: train
-          CO3D_DIR: /YOUR/PATH/TO/CO3D
-          CO3D_ANNOTATION_DIR: /YOUR/PATH/TO/CO3D_ANNOTATION
+          CO3D_DIR: /home/n9nexiang/VGGT_DFormerv2/VGGT/Dataset/multi_view_single_sequence
+          CO3D_ANNOTATION_DIR: /home/n9nexiang/VGGT_DFormerv2/VGGT/Dataset/co3d_anno
   val:
     _target_: data.dynamic_dataloader.DynamicTorchDataset
     num_workers: ${num_workers}
@@ -45,8 +45,8 @@ data:
       dataset_configs:
         - _target_: data.datasets.co3d.Co3dDataset
           split: test
-          CO3D_DIR: /YOUR/PATH/TO/CO3D
-          CO3D_ANNOTATION_DIR: /YOUR/PATH/TO/CO3D_ANNOTATION
+          CO3D_DIR: /home/n9nexiang/VGGT_DFormerv2/VGGT/Dataset/multi_view_single_sequence
+          CO3D_ANNOTATION_DIR: /home/n9nexiang/VGGT_DFormerv2/VGGT/Dataset/co3d_anno
 
 
 logging:
@@ -86,7 +86,8 @@ logging:
 checkpoint:
   save_dir: logs/${exp_name}/ckpts
   save_freq: 5
-  resume_checkpoint_path: /fsx-repligen/jianyuan/transfer_buffer/ckpts/model.pt
+  # resume_checkpoint_path: /fsx-repligen/jianyuan/transfer_buffer/ckpts/model.pt
+  resume_checkpoint_path: null
   strict: False
 
 

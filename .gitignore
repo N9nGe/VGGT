@@ -152,3 +152,5 @@ skyseg.onnx
 .gradio
 **/results/
 **/sparse/
+Dataset/
+logs/

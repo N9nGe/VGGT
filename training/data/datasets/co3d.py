@@ -211,10 +211,19 @@ class Co3dDataset(BaseDataset):
             filepath = anno["filepath"]
 
             image_path = osp.join(self.CO3D_DIR, filepath)
+            # Check if the image file exists in the dataset(not download the full dataset)
+            if not osp.exists(image_path):
+                # logging.warning(f"Image file missing, skipping: {image_path}")
+                continue
+
             image = read_image_cv2(image_path)
 
             if self.load_depth:
                 depth_path = image_path.replace("/images", "/depths") + ".geometric.png"
+                # Check if the depth file exists in the dataset(not download the full dataset)
+                if not osp.exists(depth_path):
+                    logging.warning(f"Depth file missing, skipping: {depth_path}")
+                    continue
                 depth_map = read_depth(depth_path, 1.0)
 
                 mvs_mask_path = image_path.replace(
@@ -261,6 +270,11 @@ class Co3dDataset(BaseDataset):
             point_masks.append(point_mask)
             image_paths.append(image_path)
             original_sizes.append(original_size)
+
+            # If no valid frames are found, raise an error
+            if len(images) == 0:
+                logging.warning(f"[Warning] Skipping empty sequence: {seq_name}")
+                return None
 
         set_name = "co3d"
 

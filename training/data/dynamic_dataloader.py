@@ -13,6 +13,12 @@ from torch.utils.data import DataLoader, Dataset, DistributedSampler, IterableDa
 from abc import ABC, abstractmethod
 
 from .worker_fn import get_worker_init_fn
+from torch.utils.data.dataloader import default_collate
+def safe_collate_fn(batch):
+    batch = [b for b in batch if b is not None]
+    if len(batch) == 0:
+        return None
+    return default_collate(batch)
 
 class DynamicTorchDataset(ABC):
     def __init__(
@@ -74,13 +80,16 @@ class DynamicTorchDataset(ABC):
         if hasattr(self.dataset, "set_epoch"):
             self.dataset.set_epoch(epoch)
 
+        # for invalid samples
+        collate_fn = self.collate_fn or safe_collate_fn
+
         # Create and return the dataloader
         return DataLoader(
             self.dataset,
             num_workers=self.num_workers,
             pin_memory=self.pin_memory,
             batch_sampler=self.batch_sampler,
-            collate_fn=self.collate_fn,
+            collate_fn=collate_fn,
             persistent_workers=self.persistent_workers,
             worker_init_fn=get_worker_init_fn(
                 seed=self.seed,

@@ -100,8 +100,20 @@ class ComposedDataset(Dataset, ABC):
             seq_idx = idx_tuple[0] if isinstance(idx_tuple, tuple) else idx_tuple
             idx_tuple = (seq_idx, self.fixed_num_images, self.fixed_aspect_ratio)
 
-        # Retrieve the raw data batch from the appropriate base dataset
-        batch = self.base_dataset[idx_tuple]
+        # # Retrieve the raw data batch from the appropriate base dataset
+        # batch = self.base_dataset[idx_tuple]
+
+        # modified version #########################################################
+        # If the sample is invalid, jump to a new random sample
+        try:
+            batch = self.base_dataset[idx_tuple]
+            if batch is None or not batch.get("images"):
+                return None  # Skip invalid samples
+        except Exception as e:
+            print(f"[WARNING] Skipping idx {idx_tuple} due to error: {e}")
+            return None
+        ##############################################################################
+
         seq_name = batch["seq_name"]
 
         # --- Data Conversion and Preparation ---

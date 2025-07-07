@@ -210,7 +210,14 @@ class Trainer:
         # Load optimizer state if available and in training mode
         if "optimizer" in checkpoint:
             logging.info(f"Loading optimizer state dict (rank {self.rank})")
-            self.optims.optimizer.load_state_dict(checkpoint["optimizer"])
+            # self.optims.optimizer.load_state_dict(checkpoint["optimizer"])
+            # support list of optimizer
+            if isinstance(self.optims, list):
+                if isinstance(checkpoint["optimizer"], list):
+                    for optim, state in zip(self.optims, checkpoint["optimizer"]):
+                        optim.optimizer.load_state_dict(state)
+                else:
+                    self.optims[0].optimizer.load_state_dict(checkpoint["optimizer"])
 
         # Load training progress
         if "epoch" in checkpoint:
@@ -452,7 +459,10 @@ class Trainer:
         for data_iter, batch in enumerate(val_loader):
             if data_iter > limit_val_batches:
                 break
-            
+            if batch is None:
+                print(f"[WARNING] Skipping batch {data_iter} due to all samples being None.")
+                continue  # skip this batch
+                    
             # measure data loading time
             data_time.update(time.time() - end)
             data_times.append(data_time.val)
@@ -543,6 +553,9 @@ class Trainer:
         for data_iter, batch in enumerate(train_loader):
             if data_iter > limit_train_batches:
                 break
+            if batch is None:
+                print(f"[WARNING] Skipping batch {data_iter} due to all samples being None.")
+                continue  # skip this batch
             
             # measure data loading time
             data_time.update(time.time() - end)
