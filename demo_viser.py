@@ -342,11 +342,11 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    # model = VGGT.from_pretrained("facebook/VGGT-1B")
+    model = VGGT.from_pretrained("facebook/VGGT-1B")
 
-    model = VGGT()
-    _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+    # model = VGGT()
+    # _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
+    # model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
 
     model.eval()
     model = model.to(device)

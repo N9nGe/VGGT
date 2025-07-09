@@ -31,6 +31,9 @@ from vggt.utils.helper import create_pixel_coordinate_grid, randomly_limit_trues
 from vggt.dependency.track_predict import predict_tracks
 from vggt.dependency.np_to_pycolmap import batch_np_matrix_to_pycolmap, batch_np_matrix_to_pycolmap_wo_track
 
+import imageio
+import matplotlib.pyplot as plt
+import matplotlib.cm as cm
 
 # TODO: add support for masks
 # TODO: add iterative BA
@@ -110,9 +113,10 @@ def demo_fn(args):
     print(f"Using dtype: {dtype}")
 
     # Run VGGT for camera and depth estimation
-    model = VGGT()
-    _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+    # model = VGGT()
+    # _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
+    # model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+    model = VGGT.from_pretrained("facebook/VGGT-1B")
     model.eval()
     model = model.to(device)
     print(f"Model loaded")
@@ -243,10 +247,35 @@ def demo_fn(args):
     print(f"Saving reconstruction to {args.scene_dir}/sparse")
     sparse_reconstruction_dir = os.path.join(args.scene_dir, "sparse")
     os.makedirs(sparse_reconstruction_dir, exist_ok=True)
+    depth_map_dir = os.path.join(sparse_reconstruction_dir, "depth_maps")
+    os.makedirs(depth_map_dir, exist_ok=True)
+    depth_map_data_dir = os.path.join(depth_map_dir, "depth_data")
+    os.makedirs(depth_map_data_dir, exist_ok=True)
+
     reconstruction.write(sparse_reconstruction_dir)
 
     # Save point cloud for fast visualization
     trimesh.PointCloud(points_3d, colors=points_rgb).export(os.path.join(args.scene_dir, "sparse/points.ply"))
+
+    # store every the depth map
+    max_depth_display = 4.0
+    for i in range(depth_map.shape[0]):
+        depth = depth_map[i, :, :, 0]  # (518, 518)
+
+        np.save(os.path.join(depth_map_data_dir, f"depth_{i:03d}.npy"), depth)
+
+        depth_clipped = np.clip(depth, 0, max_depth_display)
+        # normalization
+        depth_normalized = depth_clipped / max_depth_display  # float32 in [0, 1]
+
+        # convert to jet
+        colored = plt.get_cmap('jet')(depth_normalized)  # RGBA in float32
+
+        # convert to RGB8
+        colored_rgb = (colored[:, :, :3] * 255).astype(np.uint8)  # 去掉 alpha 通道
+
+        save_path = os.path.join(depth_map_dir, f"depth_map_{i:03d}.png")
+        imageio.imwrite(save_path, colored_rgb)
 
     return True
 
