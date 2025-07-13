@@ -62,6 +62,10 @@ def parse_args():
     parser.add_argument(
         "--conf_thres_value", type=float, default=5.0, help="Confidence threshold value for depth filtering (wo BA)"
     )
+    parser.add_argument(
+        "--output_depth", action="store_true", default=False, help="If set, will save depth maps as .npy and .png"
+    )
+
     return parser.parse_args()
 
 
@@ -142,7 +146,7 @@ def demo_fn(args):
     # Run with 518x518 images
     extrinsic, intrinsic, depth_map, depth_conf = run_VGGT(model, images, dtype, vggt_fixed_resolution)
     points_3d = unproject_depth_map_to_point_map(depth_map, extrinsic, intrinsic)
-
+    points_noba = points_3d
     if args.use_ba:
         image_size = np.array(images.shape[-2:])
         scale = img_load_resolution / vggt_fixed_resolution
@@ -247,35 +251,37 @@ def demo_fn(args):
     print(f"Saving reconstruction to {args.scene_dir}/sparse")
     sparse_reconstruction_dir = os.path.join(args.scene_dir, "sparse")
     os.makedirs(sparse_reconstruction_dir, exist_ok=True)
-    depth_map_dir = os.path.join(sparse_reconstruction_dir, "depth_maps")
-    os.makedirs(depth_map_dir, exist_ok=True)
-    depth_map_data_dir = os.path.join(depth_map_dir, "depth_data")
-    os.makedirs(depth_map_data_dir, exist_ok=True)
 
     reconstruction.write(sparse_reconstruction_dir)
 
     # Save point cloud for fast visualization
     trimesh.PointCloud(points_3d, colors=points_rgb).export(os.path.join(args.scene_dir, "sparse/points.ply"))
+    trimesh.PointCloud(points_noba, colors=points_rgb).export(os.path.join(args.scene_dir, "sparse/points_noba.ply"))
 
-    # store every the depth map
-    max_depth_display = 4.0
-    for i in range(depth_map.shape[0]):
-        depth = depth_map[i, :, :, 0]  # (518, 518)
+    if args.output_depth:
+        depth_map_dir = os.path.join(sparse_reconstruction_dir, "depth_maps")
+        os.makedirs(depth_map_dir, exist_ok=True)
+        depth_map_data_dir = os.path.join(depth_map_dir, "depth_data")
+        os.makedirs(depth_map_data_dir, exist_ok=True)
+        # store every the depth map
+        max_depth_display = 4.0
+        for i in range(depth_map.shape[0]):
+            depth = depth_map[i, :, :, 0]  # (518, 518)
 
-        np.save(os.path.join(depth_map_data_dir, f"depth_{i:03d}.npy"), depth)
+            np.save(os.path.join(depth_map_data_dir, f"depth_{i:03d}.npy"), depth)
 
-        depth_clipped = np.clip(depth, 0, max_depth_display)
-        # normalization
-        depth_normalized = depth_clipped / max_depth_display  # float32 in [0, 1]
+            depth_clipped = np.clip(depth, 0, max_depth_display)
+            # normalization
+            depth_normalized = depth_clipped / max_depth_display  # float32 in [0, 1]
 
-        # convert to jet
-        colored = plt.get_cmap('jet')(depth_normalized)  # RGBA in float32
+            # convert to jet
+            colored = plt.get_cmap('jet')(depth_normalized)  # RGBA in float32
 
-        # convert to RGB8
-        colored_rgb = (colored[:, :, :3] * 255).astype(np.uint8)  # 去掉 alpha 通道
+            # convert to RGB8
+            colored_rgb = (colored[:, :, :3] * 255).astype(np.uint8)  # 去掉 alpha 通道
 
-        save_path = os.path.join(depth_map_dir, f"depth_map_{i:03d}.png")
-        imageio.imwrite(save_path, colored_rgb)
+            save_path = os.path.join(depth_map_dir, f"depth_map_{i:03d}.png")
+            imageio.imwrite(save_path, colored_rgb)
 
     return True
 

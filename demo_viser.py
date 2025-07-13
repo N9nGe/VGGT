@@ -30,6 +30,9 @@ from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.utils.geometry import closed_form_inverse_se3, unproject_depth_map_to_point_map
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
+import open3d as o3d  # <-- 请确保你已安装 open3d
+from pathlib import Path
+
 
 def viser_wrapper(
     pred_dict: dict,
@@ -84,6 +87,26 @@ def viser_wrapper(
     else:
         world_points = world_points_map
         conf = conf_map
+
+    # add point cloud storing
+    print("[*] Saving dense point cloud of frame 0 (no confidence filtering)...")
+    points_first_frame = world_points[0]         # shape (H, W, 3)
+    colors_first_frame = images[0].transpose(1, 2, 0)  # shape (H, W, 3)
+
+    points_flat = points_first_frame.reshape(-1, 3)
+    colors_flat = (colors_first_frame.reshape(-1, 3) * 255).astype(np.uint8)
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(points_flat)
+    pcd.colors = o3d.utility.Vector3dVector(colors_flat / 255.0)
+
+    folder_path = Path(image_folder).resolve()
+    scene_dir = folder_path.parent  # e.g. 'self_collected_examples/room/bedroom'
+    save_dir = scene_dir / "pcd_output"
+    save_dir.mkdir(parents=True, exist_ok=True)
+    save_path = save_dir / "pcd_dense_frame0.ply"
+    o3d.io.write_point_cloud(str(save_path), pcd)
+    print(f"[*] Saved dense point cloud to {save_path}")
 
     # Apply sky segmentation if enabled
     if mask_sky and image_folder is not None:
