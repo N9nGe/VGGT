@@ -30,9 +30,27 @@ from vggt.utils.load_fn import load_and_preprocess_images
 from vggt.utils.geometry import closed_form_inverse_se3, unproject_depth_map_to_point_map
 from vggt.utils.pose_enc import pose_encoding_to_extri_intri
 
-import open3d as o3d  # <-- 请确保你已安装 open3d
+import open3d as o3d
 from pathlib import Path
+from contextlib import contextmanager
+from termcolor import cprint
+import pandas as pd
 
+timing_log = {}
+
+@contextmanager
+def timer(name: str):
+    start = time.perf_counter()
+    yield
+    end = time.perf_counter()
+    elapsed = (end - start) * 1000
+    cprint(f"[Time] {name} 用时: {elapsed:.2f} ms", color="red")
+    timing_log[name] = elapsed
+
+def write_timing_log_to_csv(log_dict, output_path="timing_log.xlsx"):
+    df = pd.DataFrame([log_dict])  # 单行DataFrame
+    df.to_excel(output_path, index=False)
+    print(f"[✓] 时间日志已保存到 {output_path}")
 
 def viser_wrapper(
     pred_dict: dict,
@@ -68,59 +86,54 @@ def viser_wrapper(
 
     server = viser.ViserServer(host="0.0.0.0", port=port)
     server.gui.configure_theme(titlebar_content=None, control_layout="collapsible")
+    with timer("generate pcds"):
+        # Unpack prediction dict
+        images = pred_dict["images"]  # (S, 3, H, W)
+        world_points_map = pred_dict["world_points"]  # (S, H, W, 3)
+        conf_map = pred_dict["world_points_conf"]  # (S, H, W)
 
-    # Unpack prediction dict
-    images = pred_dict["images"]  # (S, 3, H, W)
-    world_points_map = pred_dict["world_points"]  # (S, H, W, 3)
-    conf_map = pred_dict["world_points_conf"]  # (S, H, W)
+        depth_map = pred_dict["depth"]  # (S, H, W, 1)
+        depth_conf = pred_dict["depth_conf"]  # (S, H, W)
 
-    depth_map = pred_dict["depth"]  # (S, H, W, 1)
-    depth_conf = pred_dict["depth_conf"]  # (S, H, W)
+        extrinsics_cam = pred_dict["extrinsic"]  # (S, 3, 4)
+        intrinsics_cam = pred_dict["intrinsic"]  # (S, 3, 3)
 
-    extrinsics_cam = pred_dict["extrinsic"]  # (S, 3, 4)
-    intrinsics_cam = pred_dict["intrinsic"]  # (S, 3, 3)
+        # Compute world points from depth if not using the precomputed point map
+        if not use_point_map:
+            world_points = unproject_depth_map_to_point_map(depth_map, extrinsics_cam, intrinsics_cam)
+            conf = depth_conf
+        else:
+            world_points = world_points_map
+            conf = conf_map
 
-    # Compute world points from depth if not using the precomputed point map
-    if not use_point_map:
-        world_points = unproject_depth_map_to_point_map(depth_map, extrinsics_cam, intrinsics_cam)
-        conf = depth_conf
-    else:
-        world_points = world_points_map
-        conf = conf_map
+        # Apply sky segmentation if enabled
+        if mask_sky and image_folder is not None:
+            conf = apply_sky_segmentation(conf, image_folder)
 
-    # add point cloud storing
-    print("[*] Saving dense point cloud of frame 0 (no confidence filtering)...")
-    points_first_frame = world_points[0]         # shape (H, W, 3)
-    colors_first_frame = images[0].transpose(1, 2, 0)  # shape (H, W, 3)
+        # Convert images from (S, 3, H, W) to (S, H, W, 3)
+        # Then flatten everything for the point cloud
+        colors = images.transpose(0, 2, 3, 1)  # now (S, H, W, 3)
+        S, H, W, _ = world_points.shape
 
-    points_flat = points_first_frame.reshape(-1, 3)
-    colors_flat = (colors_first_frame.reshape(-1, 3) * 255).astype(np.uint8)
+        # Flatten
+        points = world_points.reshape(-1, 3)
+        colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
+        conf_flat = conf.reshape(-1)
 
+    write_timing_log_to_csv(timing_log)
+
+    # store the output fused pcds
     pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(points_flat)
+    pcd.points = o3d.utility.Vector3dVector(points)
     pcd.colors = o3d.utility.Vector3dVector(colors_flat / 255.0)
 
     folder_path = Path(image_folder).resolve()
     scene_dir = folder_path.parent  # e.g. 'self_collected_examples/room/bedroom'
     save_dir = scene_dir / "pcd_output"
     save_dir.mkdir(parents=True, exist_ok=True)
-    save_path = save_dir / "pcd_dense_frame0.ply"
+    save_path = save_dir / "pcd_dense.ply"
     o3d.io.write_point_cloud(str(save_path), pcd)
     print(f"[*] Saved dense point cloud to {save_path}")
-
-    # Apply sky segmentation if enabled
-    if mask_sky and image_folder is not None:
-        conf = apply_sky_segmentation(conf, image_folder)
-
-    # Convert images from (S, 3, H, W) to (S, H, W, 3)
-    # Then flatten everything for the point cloud
-    colors = images.transpose(0, 2, 3, 1)  # now (S, H, W, 3)
-    S, H, W, _ = world_points.shape
-
-    # Flatten
-    points = world_points.reshape(-1, 3)
-    colors_flat = (colors.reshape(-1, 3) * 255).astype(np.uint8)
-    conf_flat = conf.reshape(-1)
 
     cam_to_world_mat = closed_form_inverse_se3(extrinsics_cam)  # shape (S, 4, 4) typically
     # For convenience, we store only (3,4) portion
@@ -130,6 +143,13 @@ def viser_wrapper(
     scene_center = np.mean(points, axis=0)
     points_centered = points - scene_center
     cam_to_world[..., -1] -= scene_center
+
+    pcd_centered = o3d.geometry.PointCloud()
+    pcd_centered.points = o3d.utility.Vector3dVector(points_centered)
+    pcd_centered.colors = o3d.utility.Vector3dVector(colors_flat / 255.0)
+    save_path = save_dir / "pcd_dense_centered.ply"
+    o3d.io.write_point_cloud(str(save_path), pcd_centered)
+    print(f"[*] Saved dense point cloud to {save_path}")
 
     # Store frame indices so we can filter by frame
     frame_indices = np.repeat(np.arange(S), H * W)
@@ -365,39 +385,45 @@ def main():
     print(f"Using device: {device}")
 
     print("Initializing and loading VGGT model...")
-    model = VGGT.from_pretrained("facebook/VGGT-1B")
+    with timer("Model Initilization"):
+        model = VGGT.from_pretrained("facebook/VGGT-1B")
 
-    # model = VGGT()
-    # _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
-    # model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
+        # model = VGGT()
+        # _URL = "https://huggingface.co/facebook/VGGT-1B/resolve/main/model.pt"
+        # model.load_state_dict(torch.hub.load_state_dict_from_url(_URL))
 
-    model.eval()
-    model = model.to(device)
+        model.eval()
+        model = model.to(device)
 
     # Use the provided image folder path
     print(f"Loading images from {args.image_folder}...")
-    image_names = glob.glob(os.path.join(args.image_folder, "*"))
+    with timer("Image Reading"):
+        image_names = glob.glob(os.path.join(args.image_folder, "*"))
     print(f"Found {len(image_names)} images")
 
-    images = load_and_preprocess_images(image_names).to(device)
+    with timer("Image loading and preprocessing"):
+        images = load_and_preprocess_images(image_names).to(device)
     print(f"Preprocessed images shape: {images.shape}")
 
     print("Running inference...")
-    dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
+    with timer("Running inference"):
+        dtype = torch.bfloat16 if torch.cuda.get_device_capability()[0] >= 8 else torch.float16
 
-    with torch.no_grad():
-        with torch.cuda.amp.autocast(dtype=dtype):
-            predictions = model(images)
+        with torch.no_grad():
+            with torch.cuda.amp.autocast(dtype=dtype):
+                predictions = model(images)
 
     print("Converting pose encoding to extrinsic and intrinsic matrices...")
-    extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
-    predictions["extrinsic"] = extrinsic
-    predictions["intrinsic"] = intrinsic
+    with timer("Get camera extrinsic and intrinsic"):
+        extrinsic, intrinsic = pose_encoding_to_extri_intri(predictions["pose_enc"], images.shape[-2:])
+        predictions["extrinsic"] = extrinsic
+        predictions["intrinsic"] = intrinsic
 
     print("Processing model outputs...")
-    for key in predictions.keys():
-        if isinstance(predictions[key], torch.Tensor):
-            predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dimension and convert to numpy
+    with timer("model outputs postprocessing(remove batch dimension and convert to numpy)"):
+        for key in predictions.keys():
+            if isinstance(predictions[key], torch.Tensor):
+                predictions[key] = predictions[key].cpu().numpy().squeeze(0)  # remove batch dimension and convert to numpy
 
     if args.use_point_map:
         print("Visualizing 3D points from point map")
