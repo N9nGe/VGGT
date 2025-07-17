@@ -44,7 +44,7 @@ def timer(name: str):
     yield
     end = time.perf_counter()
     elapsed = (end - start) * 1000
-    cprint(f"[Time] {name} 用时: {elapsed:.2f} ms", color="red")
+    cprint(f"[Time] {name} 用时: {elapsed:.2f} ms", color="green")
     timing_log[name] = elapsed
 
 def write_timing_log_to_csv(log_dict, output_path="timing_log.xlsx"):
