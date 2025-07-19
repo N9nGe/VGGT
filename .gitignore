@@ -156,3 +156,4 @@ Dataset/
 logs/
 pcd_output
 *.xlsx
+*.json

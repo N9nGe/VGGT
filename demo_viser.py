@@ -35,6 +35,27 @@ from pathlib import Path
 from contextlib import contextmanager
 from termcolor import cprint
 import pandas as pd
+import json
+from scipy.spatial.transform import Rotation as R
+
+def save_camera_pose_json(cam_to_world: np.ndarray, save_path="camera_poses_centered.json"):
+    camera_list = []
+    for i, pose in enumerate(cam_to_world):
+        R_mat = pose[:, :3]  # (3, 3)
+        t_vec = pose[:, 3]   # (3,)
+        quat = R.from_matrix(R_mat).as_quat()  # (x, y, z, w)
+
+        camera_list.append({
+            "frame_id": i,
+            "position": t_vec.tolist(),
+            "rotation_matrix": R_mat.tolist(),
+            "rotation_quaternion": [quat[3], quat[0], quat[1], quat[2]]  # (w, x, y, z)
+        })
+
+    with open(save_path, "w") as f:
+        json.dump({"cameras": camera_list}, f, indent=4)
+    print(f"[✓] 已保存去中心化相机位姿至 {save_path}")
+
 
 timing_log = {}
 
@@ -143,6 +164,8 @@ def viser_wrapper(
     scene_center = np.mean(points, axis=0)
     points_centered = points - scene_center
     cam_to_world[..., -1] -= scene_center
+
+    save_camera_pose_json(cam_to_world, "camera_poses_centered.json")
 
     pcd_centered = o3d.geometry.PointCloud()
     pcd_centered.points = o3d.utility.Vector3dVector(points_centered)
