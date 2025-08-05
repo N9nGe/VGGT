@@ -33,7 +33,7 @@ from vggt.dependency.np_to_pycolmap import batch_np_matrix_to_pycolmap, batch_np
 
 import imageio
 import matplotlib.pyplot as plt
-import matplotlib.cm as cm
+from fvcore.nn import FlopCountAnalysis, parameter_count_table
 
 # TODO: add support for masks
 # TODO: add iterative BA
@@ -67,7 +67,6 @@ def parse_args():
     )
 
     return parser.parse_args()
-
 
 def run_VGGT(model, images, dtype, resolution=518):
     # images: [B, 3, H, W]
@@ -141,6 +140,19 @@ def demo_fn(args):
     images = images.to(device)
     original_coords = original_coords.to(device)
     print(f"Loaded {len(images)} images from {image_dir}")
+
+    # -------------------------------------
+    # [新增] 使用真实 images 输入计算 FLOPs 和 参数量
+    # -------------------------------------
+    images_copy = F.interpolate(images, size=(vggt_fixed_resolution, vggt_fixed_resolution), mode="bilinear", align_corners=False)
+    input_tensor = images_copy.unsqueeze(0) if images_copy.ndim == 4 else images_copy
+    print("[INFO] Computing model FLOPs and parameter count...")
+    with torch.cuda.amp.autocast(enabled=False):
+        flops = FlopCountAnalysis(model, input_tensor)
+        print(f"[FLOPs] VGGT for {input_tensor.shape[1]} images of size {input_tensor.shape[-2]}x{input_tensor.shape[-1]}: {flops.total() / 1e9:.2f} GFLOPs")
+    print("[Params]")
+    print(parameter_count_table(model))
+    # -------------------------------------
 
     # Run VGGT to estimate camera and depth
     # Run with 518x518 images
@@ -256,7 +268,7 @@ def demo_fn(args):
 
     # Save point cloud for fast visualization
     trimesh.PointCloud(points_3d, colors=points_rgb).export(os.path.join(args.scene_dir, "sparse/points.ply"))
-    trimesh.PointCloud(points_noba, colors=points_rgb).export(os.path.join(args.scene_dir, "sparse/points_noba.ply"))
+    # trimesh.PointCloud(points_noba, colors=points_rgb).export(os.path.join(args.scene_dir, "sparse/points_noba.ply"))
 
     if args.output_depth:
         depth_map_dir = os.path.join(sparse_reconstruction_dir, "depth_maps")
